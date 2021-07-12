@@ -204,4 +204,18 @@ def delete_tasks(id):
     })
 
     return jsonify(str(ret)) 
- 
+
+@app.route('/todo_app', methods=['DELETE'])
+def todo_App():
+    ret =[]; 
+    ret= request.json.get("task")
+    
+    for i in ret :
+    
+     set = mongo.db.wather.remove({
+
+        "_id" : ObjectId(i)
+    })
+    
+
+    return jsonify(str(set))
