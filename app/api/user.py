@@ -2,6 +2,7 @@
 from flask import (
     Blueprint, g, request, abort, jsonify , Flask
 )
+import base64
 from flask import Flask, render_template , session
 from random import randint 
 import random
@@ -24,16 +25,15 @@ import dateutil.parser
 import json
 from bson import json_util
 from passlib.apps import custom_app_context as pwd_context
-
-app = Flask(__name__)
-mail = Mail(app) 
+from app.config import app , mail ,sender_mail ,MAIL_SERVER ,MAIL_USERNAME , MAIL_PASSWORD , api_url ,MAIL_SERVER , MAIL_PORT
 
 
 
-app.config['MAIL_SERVER']='smtp.gmail.com'
-app.config['MAIL_PORT'] = 465
-app.config['MAIL_USERNAME'] = 'mohit_saini@excellencetechnologies.info'
-app.config['MAIL_PASSWORD'] = 'pyeyetbwpacvihwp'
+
+app.config['MAIL_SERVER']= MAIL_SERVER
+app.config['MAIL_PORT'] = MAIL_PORT
+app.config['MAIL_USERNAME'] = MAIL_USERNAME
+app.config['MAIL_PASSWORD'] = MAIL_PASSWORD
 app.config['MAIL_USE_TLS'] = False
 app.config['MAIL_USE_SSL'] = True
 
@@ -66,7 +66,7 @@ def register():
        "email" : email
    }).inserted_id
    if id is not None:
-        msg = Message('Welcome', sender = 'mohit_saini@excellencetechnologies.info', recipients = [email] )
+        msg = Message('Welcome', sender = sender_mail , recipients = [email] )
         msg.body = "welcome - ThankYou for Using Our Service - registerd successfully " 
         mail.send(msg)
    return jsonify(str(id))
@@ -76,27 +76,24 @@ def register():
 
 @bp.route('/login', methods=['POST'])
 def login():
-    log_username = request.json.get("username", None)
+    is_email = request.json.get("email", None)
     password = request.json.get("password", None)
-    email = request.json.get("email" , None)
-    if not log_username:
-        return jsonify(msg="Missing username parameter"), 400
+    if not is_email:
+        return jsonify(msg="Missing email parameter"), 400
     if not password:
         return jsonify(msg="Missing password parameter"), 400
-    if not email :
-        return jsonify(msg="Missing email parameter"), 400
 
-    is_user = mongo.db.users.find_one({"username": log_username})
-    if is_user is None:
-        return jsonify(msg="username doesn't exists"), 400
+    is_email = mongo.db.users.find_one({"email": is_email})
+    if is_email is None:
+        return jsonify(msg="email doesn't exists"), 400
 
-    if not pbkdf2_sha256.verify(password, is_user["password"]):
-        return jsonify(msg="password is wrong"), 400
-    username1 = log_username
+    if not pbkdf2_sha256.verify(password, is_email["password"]):
+        return jsonify(msg="old_password is wrong"), 400
+    user1=is_email
     expires = datetime.timedelta(days=1)
-    access_token = create_access_token(identity=username1, expires_delta=expires)
-    if email is not None:
-        msg = Message('Security - Login alert', sender = 'mohit_saini@excellencetechnologies.info', recipients = [email] )
+    access_token = create_access_token(identity=user1, expires_delta=expires)
+    if access_token is not None:
+        msg = Message('Security - Login alert', sender = sender_mail , recipients = [email] )
         msg.body = "Warning - New device signed in   " 
         mail.send(msg)
     return jsonify(access_token=access_token), 200
@@ -122,32 +119,25 @@ def profile():
 
 @bp.route('/reset_pass/<string:id>', methods=['PUT'])
 def pass_Reset(id):
-    log_username = request.json.get("username", None)
     email =request.json.get("email", None)
-    password = request.json.get("password", None)
+    old_password = request.json.get("password", None)
     new_password = request.json.get("new_password1", None)
-    retype_new_password = request.json.get("retype_new_password", None)
+    confirm_new_password = request.json.get("retype_new_password", None)
 
 
     hash = pbkdf2_sha256.hash("password")
-    if not log_username:
-        return jsonify(msg="Missing username parameter"), 400
-    if not password:
+    if not old_password:
         return jsonify(msg="Missing password parameter"), 400
-    if password == new_password :
+    if old_password == new_password :
         return jsonify(msg="should be diffrent from old password")
-    if new_password != retype_new_password :
+    if new_password != confirm_new_password :
         return jsonify(msg="password done not match"), 400
 
     E_mail = mongo.db.users.find_one({"email": email})
     if E_mail is None:
         return jsonify(msg = "email sone not exist")
 
-    is_user = mongo.db.users.find_one({"username": log_username })
-    if is_user is None:
-        return jsonify(msg="username doesn't exists"), 400
-
-    if not pbkdf2_sha256.verify(password, is_user["password"]):
+    if not pbkdf2_sha256.verify(password, E_mail["password"]):
         return jsonify(msg="password is wrong"), 400
 
 
@@ -161,7 +151,7 @@ def pass_Reset(id):
          }, upsert=False)
 
     if ret is not None:
-        msg = Message('Password Change Alert', sender = 'mohit_saini@excellencetechnologies.info', recipients = [email] )
+        msg = Message('Password Change Alert', sender = sender_mail , recipients = [email] )
         msg.body = "Warning - Password Chnage Request Found  " 
         mail.send(msg)  
 
@@ -174,23 +164,31 @@ def pass_Forgot():
     email = request.json.get("email", None)
     if not email:
         return jsonify(msg="Missing username parameter"), 400
-
-    global content
-    content = email
+    
+    #encoding_mail
+    sample_string_bytes = email.encode("ascii")
+    base64_bytes = base64.b64encode(sample_string_bytes)
+    base64_string = base64_bytes.decode("ascii")
+    
 
     is_mail= mongo.db.users.find_one({"email":email})
     if is_mail is not None:
-        msg = Message('Password Forgot Request', sender = 'mohit_saini@excellencetechnologies.info', recipients =[content] )
+        msg = Message('Password Forgot Request', sender = sender_mail , recipients =[email] )
         msg.body = "Request for New Password Is Accepted - Open The Link And Get A New Random Password "
-        msg.html = "(<a href ='http://127.0.0.1:5000/set_pass'>Click Here To Chnage Password</a>)"
+        msg.html = api_url
         mail.send(msg)
 
     return "check mail for set a new password"
 
 @bp.route('/set_pass', methods=['GET']) 
 def set_tempPass():
-    global content
-    email = content
+    email = request.args.get("Email")
+    
+    #decoding_mail
+    base64_bytes = email.encode("ascii")
+    sample_string_bytes = base64.b64decode(base64_bytes)
+    sample_string = sample_string_bytes.decode("ascii")
+    email = sample_string
     if not email:
         return jsonify(msg="Missing email parameter"), 400
     
@@ -207,7 +205,7 @@ def set_tempPass():
          }, upsert=False)
     
     if ret is not None:
-        msg = Message('New Password Set', sender = 'mohit_saini@excellencetechnologies.info', recipients =[email] )
+        msg = Message('New Password Set', sender = sender_mail , recipients =[email] )
         msg.body = "your new password is -"+str(password)+"-you can change it as you want"
         mail.send(msg)
 
